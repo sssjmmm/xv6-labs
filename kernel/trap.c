@@ -65,6 +65,34 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if (r_scause() == 13 || r_scause() == 15){
+    char *pa;
+    uint64 va = r_stval();
+    // 虚拟地址超过 `p->sz` 或低于用户栈时，杀死进程
+    if(va >= p->sz){
+      printf("usertrap(): invalid va=%p higher than p->sz=%p\n",
+             va, p->sz);
+      p->killed = 1;
+      goto end;
+    }
+    if(va < PGROUNDUP(p->trapframe->sp)) {  // new code
+      printf("usertrap(): invalid va=%p below the user stack sp=%p\n",
+             va, p->trapframe->sp);
+      p->killed = 1;
+      goto end;
+    }
+    if ((pa = kalloc()) == 0) {
+        printf("usertrap(): kalloc() failed\n");
+        p->killed = 1;
+        goto end;
+    }
+    memset(pa, 0, PGSIZE);
+    if (mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64) pa, PTE_W | PTE_R | PTE_U) != 0) {
+        kfree(pa);
+        printf("usertrap(): mappages() failed\n");
+        p->killed = 1;
+        goto end;
+    }
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
@@ -72,7 +100,7 @@ usertrap(void)
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
   }
-
+  end:
   if(p->killed)
     exit(-1);
 
